@@ -1,0 +1,25 @@
+# Cached CBOE option chain data
+data/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Output images (optional — remove these lines if you want to commit chart PNGs)
+*.png
