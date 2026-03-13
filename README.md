@@ -1,12 +1,17 @@
 # 0DTE GEX Analyzer — SPY / QQQ → ES / NQ
 
-A Python tool that scrapes **delayed CBOE options data**, filters for **0DTE contracts only**, computes **dealer Gamma Exposure (GEX)** by strike, and identifies the **Put Wall** (support) and **Call Wall** (resistance) — with strike prices mapped to their equivalent **ES or NQ futures levels**.
+A Python tool that scrapes **delayed CBOE options data**, filters for short-dated contracts (0DTE, 1DTE, or any combination), and produces a **two-panel chart** showing:
+
+- **Left** — Dealer Gamma Exposure (GEX) by strike, with Put Wall / Call Wall and Expected Move range
+- **Right** — OI-Weighted Implied Volatility concentration by strike
+
+Strike prices are mapped to their equivalent **ES or NQ futures levels** on the right-hand axis.
 
 ---
 
 ## What is GEX?
 
-Gamma Exposure (GEX) measures how much delta-hedging activity dealers must perform as price moves. The formula used here:
+Gamma Exposure (GEX) measures how much delta-hedging activity dealers must perform as price moves. The formula used:
 
 ```
 GEX = spot² × gamma × open_interest × contract_size × 0.01
@@ -23,18 +28,57 @@ Sign convention (assumes dealers are long calls / short puts):
 
 ---
 
+## What is the Expected Move (EM)?
+
+The EM is the options market's consensus on the likely daily price range — equivalent to a ±1 standard deviation band. It is derived from the **ATM straddle price** (call mid + put mid), falling back to the IV formula if bid/ask data is unavailable:
+
+```
+EM (straddle) = ATM call mid + ATM put mid
+EM (IV)       = spot × ATM_IV × √(1/252)
+```
+
+The EM range is shown as a shaded band on the chart. Price rarely closes outside this range on 0DTE without a macro catalyst, making the edges a useful outer boundary for intraday S/R analysis.
+
+---
+
+## What is OI-Weighted IV?
+
+Rather than looking at GEX alone, the right panel shows **implied volatility weighted by open interest** per strike — split by calls (green, right) and puts (red, left):
+
+```
+OI-Weighted IV = Σ(OI × IV) / Σ(OI)   per strike
+```
+
+Strikes with a high OI×IV reading have both **large positioning** and **elevated implied uncertainty**, meaning the market is actively defending those levels. These tend to be stickier S/R levels than GEX walls alone.
+
+---
+
+## Reading the Two Panels Together
+
+| Signal | Interpretation |
+|--------|---------------|
+| GEX wall + OI×IV spike | Highest-confidence level — dealers must hedge *and* market expects it to be contested |
+| GEX wall, no OI×IV spike | Structural level but less actively defended intraday |
+| OI×IV spike, no GEX wall | Options conviction without strong dealer hedging — watch but lower priority |
+| Both walls inside EM range | Normal session — price likely oscillates between them |
+| Wall outside EM range | Unlikely to be reached unless a catalyst drives a breakout |
+
+---
+
 ## Features
 
 - Downloads options chain JSON from CBOE (no API key required)
 - Caches data locally to `data/` — pass `--refresh` to force a new download
-- Filters for **0DTE contracts** only (falls back to nearest expiration if no 0DTE found)
-- Computes net GEX per strike, limited to ±15% from spot
-- **Horizontal bar chart** with:
-  - ETF strike price on the left Y-axis
-  - Futures equivalent (ES or NQ) on the right Y-axis
-  - Put Wall and Call Wall annotated
-  - Net GEX regime label (pinning vs. amplifying)
-- Prints a summary of free/low-cost intraday data sources
+- Flexible **DTE filter** — choose 0DTE only, 1DTE only, or combined (e.g. `0,1`)
+- Falls back to nearest expiration automatically if no matching DTE found
+- Strike prices decoded to full decimal precision from CBOE 8-digit encoding
+- **Left panel** — GEX bars (±15% from spot) with:
+  - Put Wall and Call Wall annotated with GEX magnitude
+  - Expected Move shaded band (ATM straddle or IV-derived)
+  - Spot price line and gamma regime label (pinning vs. amplifying)
+  - Summary box: spot, walls, EM range, ATM IV, total GEX
+- **Right panel** — OI-weighted IV by strike (±5% from spot, OI > 100 filter)
+- Both panels share the same price Y-axis; futures equivalent shown on the far right
 
 ---
 
@@ -45,7 +89,7 @@ Sign convention (assumes dealers are long calls / short puts):
 | SPY | ES      | × 10.0        |
 | QQQ | NQ      | × 40.0        |
 
-> **Tip:** The scale ratio is applied to strike prices for display only — GEX magnitudes remain in ETF dollar terms. Adjust the `FUTURES_SCALE` dict in the script to match the live ratio (e.g. if NQ = 21,000 and QQQ = 510, ratio ≈ 41.2).
+> **Tip:** The scale ratio is applied to strike prices for display only — GEX magnitudes remain in ETF dollar terms. Adjust the `FUTURES_SCALE` dict at the top of the script to match the live ratio (e.g. if NQ = 21,000 and QQQ = 510, ratio ≈ 41.2).
 
 ---
 
@@ -69,21 +113,23 @@ python gex_0dte.py
 python gex_0dte.py --refresh
 ```
 
-You will be prompted to enter a ticker:
+You will be prompted for a ticker and DTE selection:
 
 ```
 Enter ticker (SPY or QQQ): SPY
+DTE to include — e.g. 0  or  0,1  [default: 0]: 0
 ```
 
-### Example output
+### Example terminal output
 
 ```
 [fetch] Saved → data/SPY.json
 [data] SPY spot = 562.14  |  48,320 total contracts
-[0DTE] 1,847 contracts expire today (2025-03-11)
-[GEX] 0DTE net GEX = -2.1340 $Bn
-[GEX] Call Wall  @ strike 565  (+0.842 Bn)
-[GEX] Put Wall   @ strike 558  (-1.203 Bn)
+[filter] 0DTE (2025-03-13): 1,847 contracts
+[GEX]  0DTE net GEX = -2.1340 $Bn
+[GEX]  Call Wall  @ strike 565.00  (+0.842 Bn)
+[GEX]  Put Wall   @ strike 558.00  (-1.203 Bn)
+[EM]   ATM strike=562.00  IV=12.4%  EM=4.37 (ATM straddle)  → range [557.77, 566.51]
 ```
 
 ---
@@ -95,7 +141,8 @@ gex-0dte/
 ├── gex_0dte.py          # Main script
 ├── requirements.txt     # Python dependencies
 ├── data/                # Cached CBOE JSON files (auto-created)
-│   └── SPY.json         # Example cached payload
+│   └── .gitkeep         # Keeps folder tracked by git
+├── .gitignore
 └── README.md
 ```
 
@@ -124,12 +171,12 @@ The CBOE endpoint provides **~15-minute delayed** data for free. Options for fre
 
 | Source | Latency | Cost | Notes |
 |--------|---------|------|-------|
-| CBOE delayed URL (this script) | ~15 min | Free | Poll every 5–15 min, delete cache each loop |
+| CBOE delayed URL (this script) | ~15 min | Free | Pass `--refresh` each run to bypass cache |
 | Tradier API | ~15 min | Free (sandbox) | Requires free account + token |
 | IBKR TWS API | Real-time | Free (w/ account) | Best free option for live GEX |
 | CBOE LiveVol | Real-time | Paid subscription | Full tick data + Greeks |
 
-To loop the script for quasi-live updates, delete `data/{TICKER}.json` before each run or always pass `--refresh`.
+To poll quasi-live, run the script on a loop and always pass `--refresh` so the cache is bypassed each time.
 
 ---
 
