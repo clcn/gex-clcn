@@ -34,7 +34,7 @@ CONTRACT_SIZE = 100  # standard equity options contract multiplier
 # The ratio is applied to strike prices only — GEX magnitudes stay in ETF $.
 FUTURES_SCALE = {
     "SPY": {"futures": "ES", "ratio": 10.0},   # ES ≈ SPY × 10
-    "QQQ": {"futures": "NQ", "ratio": 41.1},   # NQ ≈ QQQ × 40
+    "QQQ": {"futures": "NQ", "ratio": 40.0},   # NQ ≈ QQQ × 40
 }
 
 # Optional: override ratios with live data by setting to True
@@ -194,17 +194,26 @@ def compute_expected_move(spot: float, df: pd.DataFrame) -> dict:
     Returns a dict with both estimates plus the ATM strike and IV used.
     Filters to OI > 50 to avoid using thinly-quoted contracts.
     """
-    # Midpoint price proxy (use 'last' if bid/ask unavailable)
+    df = df.copy()
+
+    # Ensure bid/ask columns exist
     for col in ["bid", "ask"]:
         if col not in df.columns:
-            df = df.copy()
             df[col] = np.nan
 
-    df = df.copy()
+    # Find best available fallback price column (CBOE field name varies)
+    fallback_col = next(
+        (c for c in ["last_trade_price", "last", "close", "mark"] if c in df.columns),
+        None,
+    )
+    if fallback_col:
+        print(f"[EM]  Using '{fallback_col}' as mid-price fallback")
+    fallback = df[fallback_col] if fallback_col else pd.Series(np.nan, index=df.index)
+
     df["mid"] = np.where(
         df["bid"].notna() & df["ask"].notna() & (df["bid"] > 0),
         (df["bid"] + df["ask"]) / 2,
-        df["last"],
+        fallback,
     )
 
     # ATM = strike closest to spot, with meaningful OI
