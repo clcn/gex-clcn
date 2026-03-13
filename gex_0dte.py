@@ -34,7 +34,7 @@ CONTRACT_SIZE = 100  # standard equity options contract multiplier
 # The ratio is applied to strike prices only — GEX magnitudes stay in ETF $.
 FUTURES_SCALE = {
     "SPY": {"futures": "ES", "ratio": 10.0},   # ES ≈ SPY × 10
-    "QQQ": {"futures": "NQ", "ratio": 40.0},   # NQ ≈ QQQ × 40
+    "QQQ": {"futures": "NQ", "ratio": 41.1},   # NQ ≈ QQQ × 40
 }
 
 # Optional: override ratios with live data by setting to True
